@@ -190,6 +190,9 @@ export const baseApi = createApi({
     "MCPSessions",
     "MCPPerUserHeaderCredentials",
     "FeatureFlags",
+    "AlertRules",
+    "AlertHistory",
+    "AlertChannels",
   ],
   endpoints: () => ({}),
 });
