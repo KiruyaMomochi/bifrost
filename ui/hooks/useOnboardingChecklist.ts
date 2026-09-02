@@ -70,7 +70,7 @@ export function useOnboardingChecklist({ skip = false }: { skip?: boolean } = {}
 	// AuthMiddleware whenever one is enabled, so admin_username/admin_password
 	// are never set on these deployments and would strand this step forever.
 	// Mirrors the server's own gate: SCIMConfig != nil && SCIMConfig.Enabled.
-	const ssoGatesDashboard = IS_ENTERPRISE && (scimProviders?.some((provider) => provider.enabled) ?? false);
+	const ssoGatesDashboard = IS_ENTERPRISE && (scimProviders?.some((provider: any) => provider.enabled) ?? false);
 
 	const steps: OnboardingStep[] = useMemo(() => {
 		// Order: 1) Security, 2) Provider Setup, 3) Everything Else.

@@ -23,7 +23,11 @@ let
     replace github.com/maximhq/bifrost/plugins/compat => ../plugins/compat
     replace github.com/maximhq/bifrost/plugins/logging => ../plugins/logging
     replace github.com/maximhq/bifrost/plugins/maxim => ../plugins/maxim
+    replace github.com/maximhq/bifrost/plugins/mocker => ../plugins/mocker
+    replace github.com/maximhq/bifrost/plugins/modelcatalogresolver => ../plugins/modelcatalogresolver
     replace github.com/maximhq/bifrost/plugins/otel => ../plugins/otel
+    replace github.com/maximhq/bifrost/plugins/prompts => ../plugins/prompts
+    replace github.com/maximhq/bifrost/plugins/routing => ../plugins/routing
     replace github.com/maximhq/bifrost/plugins/semanticcache => ../plugins/semanticcache
     replace github.com/maximhq/bifrost/plugins/telemetry => ../plugins/telemetry
     EOF
@@ -37,7 +41,7 @@ buildGoModule {
 
   modRoot = "transports";
   subPackages = [ "bifrost-http" ];
-  vendorHash = "sha256-Ck1cwv/DYI9EXmp7U2ZSNXlU+Qok8BFn5bcN1Pv7Nmc=";
+  vendorHash = "sha256-Lx9vsk/D3VFe8fkapK3yVTbW58Q5DlEN9VDq0HjPqrI=";
 
   doCheck = false;
 
