@@ -9,7 +9,7 @@ pkgs.buildNpmPackage {
   inherit src;
   sourceRoot = "source/ui";
 
-  npmDepsHash = "sha256-+tI2NUJtpHwvI9sAYMXO7r00Y3Pb1E62ms1ZSd3O0hM=";
+  npmDepsHash = "sha256-lXyg2jRD+KyLv/3kM2xiT72jlviiFFNq9t/NOThk0rs=";
 
   # Next's `next/font/google` requires network access at build time.
   # Nix builds are sandboxed (no network), so patch the layout to avoid
