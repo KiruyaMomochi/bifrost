@@ -59,7 +59,7 @@
         pkgs,
         system,
       }: let
-        version = "1.4.9";
+        version = "2.4.0";
 
         bifrost-ui = pkgs.callPackage ./nix/packages/bifrost-ui.nix {
           src = self;

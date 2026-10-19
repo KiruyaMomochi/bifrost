@@ -19,11 +19,15 @@ let
 
     replace github.com/maximhq/bifrost/core => ../core
     replace github.com/maximhq/bifrost/framework => ../framework
-    replace github.com/maximhq/bifrost/plugins/governance => ../plugins/governance
     replace github.com/maximhq/bifrost/plugins/compat => ../plugins/compat
+    replace github.com/maximhq/bifrost/plugins/governance => ../plugins/governance
     replace github.com/maximhq/bifrost/plugins/logging => ../plugins/logging
     replace github.com/maximhq/bifrost/plugins/maxim => ../plugins/maxim
+    replace github.com/maximhq/bifrost/plugins/mocker => ../plugins/mocker
+    replace github.com/maximhq/bifrost/plugins/modelcatalogresolver => ../plugins/modelcatalogresolver
     replace github.com/maximhq/bifrost/plugins/otel => ../plugins/otel
+    replace github.com/maximhq/bifrost/plugins/prompts => ../plugins/prompts
+    replace github.com/maximhq/bifrost/plugins/routing => ../plugins/routing
     replace github.com/maximhq/bifrost/plugins/semanticcache => ../plugins/semanticcache
     replace github.com/maximhq/bifrost/plugins/telemetry => ../plugins/telemetry
     EOF
@@ -37,7 +41,7 @@ buildGoModule {
 
   modRoot = "transports";
   subPackages = [ "bifrost-http" ];
-  vendorHash = "sha256-Ck1cwv/DYI9EXmp7U2ZSNXlU+Qok8BFn5bcN1Pv7Nmc=";
+  vendorHash = "sha256-nQsBf6bcODQf8CFR8+sde2Fhc03c5KrQehwqSfIuJIM=";
 
   doCheck = false;
 
@@ -61,11 +65,8 @@ buildGoModule {
     # Provide UI assets for //go:embed all:ui
     rm -rf bifrost-http/ui
     mkdir -p bifrost-http/ui
-    if [ -d "${bifrost-ui}/ui" ]; then
-      cp -R --no-preserve=mode,ownership,timestamps "${bifrost-ui}/ui/." bifrost-http/ui/
-    else
-      printf '%s\n' '<!doctype html><meta charset="utf-8"><title>Bifrost</title>' > bifrost-http/ui/index.html
-    fi
+    test -s "${bifrost-ui}/ui/index.html"
+    cp -R --no-preserve=mode,ownership,timestamps "${bifrost-ui}/ui/." bifrost-http/ui/
   '';
 
   ldflags = [
