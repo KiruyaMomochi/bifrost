@@ -801,6 +801,78 @@ func TestWrapConvertedStreamPostHookRunnerKeepsStreamIdentityOnEveryChunk(t *tes
 	}
 }
 
+// The chunk converter derives a tool call's index from output_index - 1, which only
+// holds when a single reasoning item precedes the calls. A turn that calls tools
+// straight away put its first two calls on index 0, and chat clients concatenated
+// their arguments into one call ({"name":"a"}{"name":"b"}).
+func TestWrapConvertedStreamPostHookRunnerNumbersToolCallsInOrder(t *testing.T) {
+	reasoning := schemas.ResponsesMessageTypeReasoning
+	message := schemas.ResponsesMessageTypeMessage
+	functionCall := schemas.ResponsesMessageTypeFunctionCall
+	call := func(outputIndex int, id string) []*schemas.BifrostResponsesStreamResponse {
+		return []*schemas.BifrostResponsesStreamResponse{
+			{
+				Type:        schemas.ResponsesStreamResponseTypeOutputItemAdded,
+				OutputIndex: schemas.Ptr(outputIndex),
+				Item: &schemas.ResponsesMessage{
+					Type:                 &functionCall,
+					ResponsesToolMessage: &schemas.ResponsesToolMessage{CallID: schemas.Ptr(id), Name: schemas.Ptr("skill_view")},
+				},
+			},
+			{Type: schemas.ResponsesStreamResponseTypeFunctionCallArgumentsDelta, OutputIndex: schemas.Ptr(outputIndex), Delta: schemas.Ptr(`{"name":"` + id + `"}`)},
+		}
+	}
+	item := func(outputIndex int, typ *schemas.ResponsesMessageType) *schemas.BifrostResponsesStreamResponse {
+		return &schemas.BifrostResponsesStreamResponse{Type: schemas.ResponsesStreamResponseTypeOutputItemAdded, OutputIndex: schemas.Ptr(outputIndex), Item: &schemas.ResponsesMessage{Type: typ}}
+	}
+	concat := func(parts ...[]*schemas.BifrostResponsesStreamResponse) []*schemas.BifrostResponsesStreamResponse {
+		var out []*schemas.BifrostResponsesStreamResponse
+		for _, p := range parts {
+			out = append(out, p...)
+		}
+		return out
+	}
+
+	tests := []struct {
+		name   string
+		events []*schemas.BifrostResponsesStreamResponse
+	}{
+		{name: "calls with no reasoning item", events: concat(call(0, "a"), call(1, "b"), call(2, "c"))},
+		{name: "calls after one reasoning item", events: concat([]*schemas.BifrostResponsesStreamResponse{item(0, &reasoning)}, call(1, "a"), call(2, "b"), call(3, "c"))},
+		{name: "calls after commentary and reasoning", events: concat([]*schemas.BifrostResponsesStreamResponse{item(0, &reasoning), item(1, &message)}, call(2, "a"), call(3, "b"), call(4, "c"))},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			args := map[uint16]string{}
+			ids := map[uint16]string{}
+			runner := wrapConvertedStreamPostHookRunner(func(_ *schemas.BifrostContext, result *schemas.BifrostResponse, bifrostErr *schemas.BifrostError) (*schemas.BifrostResponse, *schemas.BifrostError) {
+				require.NotNil(t, result.ChatResponse)
+				for _, choice := range result.ChatResponse.Choices {
+					if choice.ChatStreamResponseChoice == nil || choice.Delta == nil {
+						continue
+					}
+					for _, tc := range choice.Delta.ToolCalls {
+						if tc.ID != nil {
+							ids[tc.Index] = *tc.ID
+						}
+						args[tc.Index] += tc.Function.Arguments
+					}
+				}
+				return result, bifrostErr
+			}, schemas.ResponsesRequest)
+
+			ctx := schemas.NewBifrostContext(context.Background(), time.Time{})
+			for _, event := range tt.events {
+				runner(ctx, &schemas.BifrostResponse{ResponsesStreamResponse: event}, nil)
+			}
+
+			assert.Equal(t, map[uint16]string{0: "a", 1: "b", 2: "c"}, ids)
+			assert.Equal(t, map[uint16]string{0: `{"name":"a"}`, 1: `{"name":"b"}`, 2: `{"name":"c"}`}, args)
+		})
+	}
+}
+
 // BenchmarkWrapConvertedStreamPostHookRunner measures one converted text turn,
 // created through completed, as a chat stream served through Responses sees it.
 func BenchmarkWrapConvertedStreamPostHookRunner(b *testing.B) {

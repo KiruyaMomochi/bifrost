@@ -902,6 +902,7 @@ func isPromptOptionalVideoEditType(t *string) bool {
 func wrapConvertedStreamPostHookRunner(postHookRunner schemas.PostHookRunner, targetType schemas.RequestType) schemas.PostHookRunner {
 	roleSent := false
 	var identity chatStreamIdentity
+	var toolIndexes chatToolCallIndexer
 	return func(ctx *schemas.BifrostContext, result *schemas.BifrostResponse, bifrostErr *schemas.BifrostError) (*schemas.BifrostResponse, *schemas.BifrostError) {
 		if result != nil {
 			switch targetType {
@@ -919,6 +920,7 @@ func wrapConvertedStreamPostHookRunner(postHookRunner schemas.PostHookRunner, ta
 					if converted := result.ResponsesStreamResponse.ToBifrostChatResponse(); converted != nil {
 						roleSent = setAssistantRoleOnce(converted, roleSent)
 						identity.apply(converted)
+						toolIndexes.apply(result.ResponsesStreamResponse, converted)
 						converted.ExtraFields.ConvertedRequestType = targetType
 						result = &schemas.BifrostResponse{ChatResponse: converted}
 					}
@@ -926,6 +928,35 @@ func wrapConvertedStreamPostHookRunner(postHookRunner schemas.PostHookRunner, ta
 			}
 		}
 		return postHookRunner(ctx, result, bifrostErr)
+	}
+}
+
+// chatToolCallIndexer numbers the function calls of a converted chat stream in
+// the order their items open. The stateless chunk converter can only derive the
+// index from output_index - 1, which assumes exactly one item (a reasoning item)
+// precedes the calls: without it the first two calls share index 0 and clients
+// concatenate their arguments, and any extra message or reasoning item shifts
+// every later index.
+type chatToolCallIndexer struct {
+	byOutputIndex map[int]uint16
+}
+
+// apply rewrites the tool call index of a converted function-call chunk.
+func (s *chatToolCallIndexer) apply(event *schemas.BifrostResponsesStreamResponse, resp *schemas.BifrostChatResponse) {
+	if event.OutputIndex == nil || len(resp.Choices) == 0 || resp.Choices[0].ChatStreamResponseChoice == nil ||
+		resp.Choices[0].Delta == nil || len(resp.Choices[0].Delta.ToolCalls) == 0 {
+		return
+	}
+	if s.byOutputIndex == nil {
+		s.byOutputIndex = make(map[int]uint16)
+	}
+	idx, ok := s.byOutputIndex[*event.OutputIndex]
+	if !ok {
+		idx = uint16(len(s.byOutputIndex))
+		s.byOutputIndex[*event.OutputIndex] = idx
+	}
+	for i := range resp.Choices[0].Delta.ToolCalls {
+		resp.Choices[0].Delta.ToolCalls[i].Index = idx
 	}
 }
 
