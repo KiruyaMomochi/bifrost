@@ -50,7 +50,7 @@
         ...
       }: {
         imports = [./nix/modules/bifrost.nix];
-        services.bifrost.package = lib.mkDefault self.packages.${pkgs.system}.bifrost-http;
+        services.bifrost.package = lib.mkDefault self.packages.${pkgs.stdenv.hostPlatform.system}.bifrost-http;
       };
     };
 
