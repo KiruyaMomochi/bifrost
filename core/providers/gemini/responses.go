@@ -5137,6 +5137,18 @@ func convertResponsesMessagesToGeminiContents(messages []schemas.ResponsesMessag
 	var contents []Content
 	var systemInstruction *Content
 
+	// Responses items (thoughts, assistant text, and parallel calls) can be
+	// fragments of one Gemini model turn. Never split calls into separate turns
+	// before their function responses arrive. User turns remain boundaries.
+	appendModelContent := func(content Content) {
+		if len(contents) > 0 && content.Role == "model" && contents[len(contents)-1].Role == "model" {
+			last := &contents[len(contents)-1]
+			last.Parts = append(last.Parts, content.Parts...)
+			return
+		}
+		contents = append(contents, content)
+	}
+
 	// Build a map from callID → function name by scanning function_call messages.
 	callIDToName := make(map[string]string)
 	for i := range messages {
@@ -5215,7 +5227,11 @@ func convertResponsesMessagesToGeminiContents(messages []schemas.ResponsesMessag
 			}
 
 			if len(parts) > 0 {
-				contents = append(contents, Content{
+				// A new thought after tool results belongs to the next model turn.
+				if len(pendingFunctionResponseParts) > 0 {
+					flushFunctionResponses()
+				}
+				appendModelContent(Content{
 					Parts: parts,
 					Role:  "model",
 				})
@@ -5300,6 +5316,8 @@ func convertResponsesMessagesToGeminiContents(messages []schemas.ResponsesMessag
 		if msg.ResponsesToolMessage != nil && msg.Type != nil {
 			switch *msg.Type {
 			case schemas.ResponsesMessageTypeFunctionCall:
+				// Responses function_call items usually have no role.
+				content.Role = "model"
 				// Convert function call to Gemini FunctionCall
 				if msg.ResponsesToolMessage.Name != nil {
 					var argsRaw json.RawMessage
@@ -5510,7 +5528,7 @@ func convertResponsesMessagesToGeminiContents(messages []schemas.ResponsesMessag
 		}
 
 		if len(content.Parts) > 0 {
-			contents = append(contents, content)
+			appendModelContent(content)
 		}
 	}
 

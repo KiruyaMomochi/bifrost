@@ -2715,6 +2715,127 @@ func TestConvertGeminiContentsToResponsesMessages_MintsUniqueCallIDsWhenMissing(
 	}
 }
 
+// Responses splits a native model turn into calls and signature-bearing reasoning
+// items. Replaying it must not create a new model turn with calls still pending.
+func TestResponsesParallelFunctionCallTurn(t *testing.T) {
+	for _, prefix := range []string{"", `{"type":"reasoning","summary":[{"type":"summary_text","text":"thinking"}]}, {"type":"message","role":"assistant","content":"reading both"},`} {
+		t.Run(fmt.Sprintf("prefix=%t", prefix != ""), func(t *testing.T) {
+			var messages []schemas.ResponsesMessage
+			require.NoError(t, json.Unmarshal([]byte(`[
+				{"role":"user","content":"read both"},`+prefix+`
+				{"type":"function_call","call_id":"call_1","name":"read_file","arguments":"{}"},
+				{"type":"reasoning","encrypted_content":"c2lnMQ==","summary":[]},
+				{"type":"function_call","call_id":"call_2","name":"skill_view","arguments":"{}"},
+				{"type":"reasoning","encrypted_content":"c2lnMg==","summary":[]},
+				{"type":"function_call_output","call_id":"call_2","output":"two"},
+				{"type":"function_call_output","call_id":"call_1","output":"one"},
+				{"role":"assistant","content":"done"},
+				{"role":"user","content":"again"},
+				{"type":"function_call","call_id":"call_3","name":"read_file","arguments":"{}"},
+				{"type":"function_call_output","call_id":"call_3","output":"three"}
+			]`), &messages))
+			contents, _, err := convertResponsesMessagesToGeminiContents(messages, "gemini-3-pro-preview", schemas.Gemini)
+			require.NoError(t, err)
+			require.Len(t, contents, 7, "calls and optional thought/text must share one model turn")
+			assert.Equal(t, []string{"user", "model", "user", "model", "user", "model", "user"}, []string{contents[0].Role, contents[1].Role, contents[2].Role, contents[3].Role, contents[4].Role, contents[5].Role, contents[6].Role})
+			parts := contents[1].Parts
+			if prefix != "" {
+				require.Len(t, parts, 4)
+				assert.True(t, parts[0].Thought)
+				assert.Equal(t, "thinking", parts[0].Text)
+				assert.Equal(t, "reading both", parts[1].Text)
+				parts = parts[2:]
+			}
+			require.Len(t, parts, 2)
+			for i, part := range parts {
+				require.NotNil(t, part.FunctionCall)
+				assert.Equal(t, fmt.Sprintf("call_%d", i+1), part.FunctionCall.ID)
+				assert.Equal(t, []byte(fmt.Sprintf("sig%d", i+1)), []byte(part.ThoughtSignature))
+			}
+			require.Len(t, contents[2].Parts, 2)
+			for i, part := range contents[2].Parts {
+				require.NotNil(t, part.FunctionResponse)
+				assert.Equal(t, fmt.Sprintf("call_%d", i+1), part.FunctionResponse.ID)
+				assert.Nil(t, part.FunctionCall)
+			}
+			require.Len(t, contents[5].Parts, 1)
+			assert.Equal(t, "call_3", contents[5].Parts[0].FunctionCall.ID)
+		})
+	}
+}
+
+func TestResponsesReasoningAfterFunctionOutputStartsNewModelTurn(t *testing.T) {
+	var messages []schemas.ResponsesMessage
+	require.NoError(t, json.Unmarshal([]byte(`[
+		{"role":"user","content":"read"},
+		{"type":"function_call","call_id":"call_1","name":"read_file","arguments":"{}"},
+		{"type":"function_call_output","call_id":"call_1","output":"one"},
+		{"type":"reasoning","summary":[{"type":"summary_text","text":"next thought"}]}
+	]`), &messages))
+	contents, _, err := convertResponsesMessagesToGeminiContents(messages, "gemini-3-pro-preview", schemas.Gemini)
+	require.NoError(t, err)
+	require.Len(t, contents, 4)
+	assert.Equal(t, "user", contents[2].Role)
+	require.NotNil(t, contents[2].Parts[0].FunctionResponse)
+	assert.Equal(t, "model", contents[3].Role)
+	require.Len(t, contents[3].Parts, 1)
+	assert.True(t, contents[3].Parts[0].Thought)
+	assert.Equal(t, "next thought", contents[3].Parts[0].Text)
+}
+
+func TestResponsesParallelFunctionCallNativeRoundTrip(t *testing.T) {
+	original := []Content{
+		{Role: "user", Parts: []*Part{{Text: "read both"}}},
+		{Role: "model", Parts: []*Part{
+			{Thought: true, Text: "thinking"},
+			{Text: "reading both"},
+			{FunctionCall: &FunctionCall{ID: "call_1", Name: "read_file", Args: json.RawMessage(`{}`)}, ThoughtSignature: []byte("sig1")},
+			{FunctionCall: &FunctionCall{ID: "call_2", Name: "skill_view", Args: json.RawMessage(`{}`)}, ThoughtSignature: []byte("sig2")},
+		}},
+		{Role: "user", Parts: []*Part{
+			{FunctionResponse: &FunctionResponse{ID: "call_1", Name: "read_file", Response: json.RawMessage(`{"output":"one"}`)}},
+			{FunctionResponse: &FunctionResponse{ID: "call_2", Name: "skill_view", Response: json.RawMessage(`{"output":"two"}`)}},
+		}},
+	}
+	messages := convertGeminiContentsToResponsesMessages(original)
+	for _, provider := range []schemas.ModelProvider{schemas.Gemini, schemas.Vertex} {
+		t.Run(string(provider), func(t *testing.T) {
+			replayed, _, err := convertResponsesMessagesToGeminiContents(messages, "gemini-3-pro-preview", provider)
+			require.NoError(t, err)
+			assert.Equal(t, original, replayed)
+		})
+	}
+}
+
+func BenchmarkResponsesParallelFunctionCallTurn(b *testing.B) {
+	for name, input := range map[string]string{
+		"text_only": `[{"role":"user","content":"hello"}]`,
+		"parallel": `[
+			{"role":"user","content":"read both"},
+			{"type":"function_call","call_id":"c1","name":"read_file","arguments":"{}"},
+			{"type":"reasoning","encrypted_content":"c2lnMQ==","summary":[]},
+			{"type":"function_call","call_id":"c2","name":"read_file","arguments":"{}"},
+			{"type":"reasoning","encrypted_content":"c2lnMg==","summary":[]},
+			{"type":"function_call_output","call_id":"c1","output":"one"},
+			{"type":"function_call_output","call_id":"c2","output":"two"}
+		]`,
+	} {
+		b.Run(name, func(b *testing.B) {
+			var messages []schemas.ResponsesMessage
+			if err := json.Unmarshal([]byte(input), &messages); err != nil {
+				b.Fatal(err)
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for b.Loop() {
+				if _, _, err := convertResponsesMessagesToGeminiContents(messages, "gemini-3-pro-preview", schemas.Gemini); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
+}
+
 func BenchmarkConvertGeminiContentsToResponsesMessages_FunctionCalls(b *testing.B) {
 	build := func(withIDs bool) []Content {
 		id := func(n string) string {
