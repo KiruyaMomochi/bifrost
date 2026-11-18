@@ -9,7 +9,7 @@ pkgs.buildNpmPackage {
   inherit src;
   sourceRoot = "source/ui";
 
-  npmDepsHash = "sha256-GBxwxHmvAlMMS9WtTC7ITLvLNuLjcE8IxaHbHXd7qM8=";
+  npmDepsHash = "sha256-JtaSXBfz7toZ8gF9Jjq5iveV/b5obQNhA9VvjyvDky0=";
 
   # Avoid the upstream build script's copy step (writes outside $PWD).
   npmBuildScript = "build-enterprise";
