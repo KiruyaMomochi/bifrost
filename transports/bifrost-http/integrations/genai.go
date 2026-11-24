@@ -1928,12 +1928,21 @@ func isSpeechRequest(req *gemini.GeminiGenerationRequest) bool {
 	return false
 }
 
-// isTranscriptionRequest checks if the request is for audio transcription (speech-to-text)
-// Transcription is detected by the presence of audio input in parts, but NOT if it's a speech request
+// isTranscriptionRequest checks if the request is for dedicated speech-to-text models
+// (e.g. openai/whisper-1 called via the GenAI SDK). Native Gemini/Vertex models and
+// multi-turn/tool/system conversations understand audio directly via ResponsesRequest.
 func isTranscriptionRequest(req *gemini.GeminiGenerationRequest) bool {
 	// If this is already detected as a speech request, it's not transcription
 	// This handles the edge case of bidirectional audio (input + output)
 	if isSpeechRequest(req) {
+		return false
+	}
+
+	provider, model := schemas.ParseModelString(req.Model, "")
+	if provider == schemas.Gemini || provider == schemas.Vertex || strings.Contains(strings.ToLower(model), "gemini") {
+		return false
+	}
+	if len(req.Contents) > 1 || req.SystemInstruction != nil || len(req.Tools) > 0 {
 		return false
 	}
 
